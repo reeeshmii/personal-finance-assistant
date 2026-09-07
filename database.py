@@ -183,7 +183,7 @@ class ExpenseDatabase:
                     WHERE rel.relname = 'budgets'
                       AND con.contype = 'u'
                       AND (
-                          SELECT array_agg(att.attname ORDER BY x.ordinality)
+                          SELECT array_agg(att.attname ORDER BY x.ordinality)::text[]
                           FROM unnest(con.conkey) WITH ORDINALITY AS x(attnum, ordinality)
                           JOIN pg_attribute att ON att.attrelid = rel.oid AND att.attnum = x.attnum
                       ) = ARRAY['category','month']::text[]
