@@ -19,6 +19,7 @@ load_dotenv()
 CATEGORY_KEYWORDS: Dict[str, List[str]] = {
     "food": ["lunch", "dinner", "breakfast", "snack", "meal"],
     "groceries": ["grocery", "groceries", "supermarket", "vegetable", "fruit", "milk", "bread"],
+    "merchants": ["blinkit", "zepto", "bigbasket", "zomato","swiggy","amazon","flipkart"],
     "transportation": ["bus", "train", "taxi", "uber", "ola", "auto", "fuel", "petrol", "metro"],
     "entertainment": ["movie", "game", "concert", "netflix", "hotstar", "theater"],
     "shopping": ["buy", "purchase", "shopping", "clothes", "amazon", "flipkart", "mall"],
@@ -67,12 +68,19 @@ class FinanceNLP:
             if result:
                 return result
         return self._local_parse_transaction(user_input)
+    
+    def parse_transaction(self, user_input: str) -> Dict:  
+        if self.client:
+            result = self._groq_parse(user_input)
 
-    def parse_expense(self, user_input: str) -> Dict:
-        result = self.parse_transaction(user_input)
-        if result.get("type") != "expense":
-            raise ValueError("Input is not an expense transaction.")
-        return result
+        # Only accept Groq result if it successfully identified
+        # an actual income or expense transaction.
+        if result and result.get("type") in {"expense", "income"}:
+            return result
+        # If Groq returns unknown/fails, use deterministic local parsing.
+        return self._local_parse_transaction(user_input)
+
+    
 
     def parse_income(self, user_input: str) -> Dict:
         result = self.parse_transaction(user_input)
@@ -203,12 +211,30 @@ class FinanceNLP:
             return {"type": "income", "amount": amount, "source": source, "description": source, "date": tx_date}
         if any(word in lower for word in _EXPENSE_WORDS):
             return {
-                "type": "expense",
-                "amount": amount,
-                "description": self._clean_description(text) or "Expense",
-                "category": self._detect_category(lower),
-                "date": tx_date,
-            }
+        "type": "expense",
+        "amount": amount,
+        "description": self._clean_description(text) or "Expense",
+        "category": self._detect_category(lower),
+        "date": tx_date,
+         }
+
+# Natural shorthand such as:
+# "blinkit 60"
+# "uber 150"
+# "lunch 250"
+# "shampoo 300"
+# "movie 500"
+#
+# If there is a positive amount and no income intent,
+# interpret the input as an expense.
+        if amount > 0:
+            return {
+        "type": "expense",
+        "amount": amount,
+        "description": self._clean_description(text) or "Expense",
+        "category": self._detect_category(lower),
+        "date": tx_date,
+    }
         return {"type": "unknown", "amount": 0}
 
     def _extract_amount(self, text: str) -> float:
