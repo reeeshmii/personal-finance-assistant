@@ -1,6 +1,6 @@
 # FinSet — Personal Finance Assistant
 
-A lightweight personal finance assistant built with **FastAPI + vanilla JavaScript**, with deterministic server-side financial analytics and optional **Groq-powered natural-language transaction parsing and financial Q&A**.
+FinSet is a web-based personal finance assistant that helps users track expenses, manage income and budgets, visualize spending patterns and optional **Groq-powered natural-language transaction parsing and financial Q&A**.
 
 <img width="1895" height="876" alt="image" src="https://github.com/user-attachments/assets/96a8f7cf-2979-444c-a056-802f41843ed1" />
 
