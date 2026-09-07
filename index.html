@@ -411,11 +411,33 @@
 
                     <div class="bg-white rounded-2xl shadow-sm p-6">
 
-                        <h2 class="text-xl font-bold text-gray-800 mb-4">
-                            Spending by Category
-                        </h2>
+                        <div class="flex items-center justify-between mb-4">
 
-                        <div class="h-64">
+                            <div>
+
+                                <h2 class="text-xl font-bold text-gray-800">
+                                    Spending by Category
+                                </h2>
+
+                                <p class="text-sm text-gray-500">
+                                    Current 30-day spending
+                                </p>
+
+                            </div>
+
+                            <button
+                                id="refresh-dashboard-chart"
+                                type="button"
+                                class="text-sm text-primary hover:text-blue-700 font-medium px-3 py-2 rounded-lg hover:bg-blue-50 transition-colors"
+                                title="Refresh spending chart"
+                            >
+                                <i class="fas fa-sync-alt mr-1"></i>
+                                Refresh
+                            </button>
+
+                        </div>
+
+                        <div class="relative h-72">
                             <canvas id="dashboardSpendingChart"></canvas>
                         </div>
 
@@ -472,8 +494,6 @@
 
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
-                <!-- EXPENSE LIST -->
-
                 <div class="lg:col-span-2">
 
                     <div class="bg-white rounded-2xl shadow-sm">
@@ -505,8 +525,6 @@
                 </div>
 
 
-                <!-- EXPENSE STATISTICS -->
-
                 <div class="space-y-8">
 
                     <div class="bg-white rounded-2xl shadow-sm p-6">
@@ -532,7 +550,6 @@
 
                             </div>
 
-
                             <div class="flex justify-between items-center">
 
                                 <span class="text-gray-600">
@@ -547,7 +564,6 @@
                                 </span>
 
                             </div>
-
 
                             <div class="flex justify-between items-center">
 
@@ -596,8 +612,6 @@
 
             </div>
 
-
-            <!-- KPI CARDS -->
 
             <div
                 id="analytics-kpis"
@@ -670,8 +684,6 @@
             </div>
 
 
-            <!-- CHARTS -->
-
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8">
 
                 <!-- ANALYTICS DONUT -->
@@ -692,9 +704,18 @@
 
                         </div>
 
+                        <button
+                            id="refresh-analytics"
+                            type="button"
+                            class="text-sm text-primary hover:text-blue-700 font-medium px-3 py-2 rounded-lg hover:bg-blue-50 transition-colors"
+                        >
+                            <i class="fas fa-sync-alt mr-1"></i>
+                            Refresh
+                        </button>
+
                     </div>
 
-                    <div class="h-72">
+                    <div class="relative h-72">
                         <canvas id="spendingChart"></canvas>
                     </div>
 
@@ -713,7 +734,7 @@
                         Monthly cash-flow trend
                     </p>
 
-                    <div class="h-72">
+                    <div class="relative h-72">
                         <canvas id="trendsChart"></canvas>
                     </div>
 
@@ -722,11 +743,7 @@
             </div>
 
 
-            <!-- SAVINGS + KEY METRICS -->
-
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8">
-
-                <!-- SAVINGS TREND -->
 
                 <div class="bg-white rounded-2xl shadow-sm p-6">
 
@@ -738,14 +755,12 @@
                         Monthly savings and cash flow
                     </p>
 
-                    <div class="h-72">
+                    <div class="relative h-72">
                         <canvas id="cashflowChart"></canvas>
                     </div>
 
                 </div>
 
-
-                <!-- KEY METRICS -->
 
                 <div class="bg-white rounded-2xl shadow-sm p-6">
 
@@ -825,11 +840,7 @@
             </div>
 
 
-            <!-- INSIGHTS + TOP CATEGORIES -->
-
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-8 mb-8">
-
-                <!-- INSIGHTS -->
 
                 <div class="bg-white rounded-2xl shadow-sm p-6">
 
@@ -848,8 +859,6 @@
 
                 </div>
 
-
-                <!-- TOP CATEGORIES -->
 
                 <div class="bg-white rounded-2xl shadow-sm p-6">
 
@@ -871,11 +880,7 @@
             </div>
 
 
-            <!-- LARGEST TRANSACTIONS + BUDGET -->
-
             <div class="grid grid-cols-1 xl:grid-cols-2 gap-8">
-
-                <!-- LARGEST TRANSACTIONS -->
 
                 <div class="bg-white rounded-2xl shadow-sm p-6">
 
@@ -894,8 +899,6 @@
 
                 </div>
 
-
-                <!-- BUDGET HEALTH -->
 
                 <div class="bg-white rounded-2xl shadow-sm p-6">
 
@@ -998,6 +1001,65 @@
     }
 
 
+    /*
+     * =========================================================
+     * USER ID
+     * =========================================================
+     *
+     * Every browser receives its own anonymous ID.
+     *
+     * This prevents different users from seeing each other's
+     * transactions while avoiding the need for a login system.
+     */
+
+    function getUserId() {
+
+        const storageKey =
+            'finset_user_id';
+
+        let userId =
+            localStorage.getItem(storageKey);
+
+
+        if (userId) {
+            return userId;
+        }
+
+
+        if (
+            window.crypto &&
+            typeof window.crypto.randomUUID === 'function'
+        ) {
+
+            userId =
+                window.crypto.randomUUID();
+
+        }
+
+        else {
+
+            userId =
+                'user-' +
+                Date.now().toString(36) +
+                '-' +
+                Math.random()
+                    .toString(36)
+                    .substring(2, 12);
+
+        }
+
+
+        localStorage.setItem(
+            storageKey,
+            userId
+        );
+
+
+        return userId;
+
+    }
+
+
     /* =========================================================
        FINANCE DASHBOARD
     ========================================================== */
@@ -1014,10 +1076,11 @@
 
 
             /*
-             * IMPORTANT:
+             * One chart instance per canvas.
              *
-             * Separate chart instances prevent the Dashboard
-             * donut from destroying the Analytics donut.
+             * IMPORTANT:
+             * The dashboard chart and analytics chart are
+             * completely independent.
              */
 
             this.dashboardChart = null;
@@ -1026,14 +1089,112 @@
             this.cashflowChart = null;
 
 
+            /*
+             * Anonymous browser-specific user ID.
+             */
+
+            this.userId =
+                getUserId();
+
+
             this.setupNavigation();
             this.initializeChat();
-            this.loadDashboardData();
+
+            /*
+             * Initial dashboard load creates the donut.
+             */
+
+            this.loadDashboardData(
+                true
+            );
+
+
+            /*
+             * Dashboard refresh button.
+             */
+
+            const refreshDashboardButton =
+                document.getElementById(
+                    'refresh-dashboard-chart'
+                );
+
+
+            if (refreshDashboardButton) {
+
+                refreshDashboardButton.addEventListener(
+                    'click',
+                    async () => {
+
+                        refreshDashboardButton.disabled =
+                            true;
+
+                        refreshDashboardButton.innerHTML = `
+                            <i class="fas fa-spinner fa-spin mr-1"></i>
+                            Loading...
+                        `;
+
+
+                        try {
+
+                            await this.loadDashboardData(
+                                true
+                            );
+
+                        }
+
+                        finally {
+
+                            refreshDashboardButton.disabled =
+                                false;
+
+                            refreshDashboardButton.innerHTML = `
+                                <i class="fas fa-sync-alt mr-1"></i>
+                                Refresh
+                            `;
+
+                        }
+
+                    }
+                );
+
+            }
+
 
             console.log(
-                '💰 Finance Dashboard Initialized. API:',
-                this.apiBase
+                '💰 Finance Dashboard Initialized.',
+                'API:',
+                this.apiBase,
+                'User:',
+                this.userId
             );
+
+        }
+
+
+        /* =====================================================
+           API HEADERS
+        ====================================================== */
+
+        getHeaders(includeJson = false) {
+
+            const headers = {
+
+                'X-User-ID':
+                    this.userId
+
+            };
+
+
+            if (includeJson) {
+
+                headers['Content-Type'] =
+                    'application/json';
+
+            }
+
+
+            return headers;
+
         }
 
 
@@ -1044,27 +1205,44 @@
         setupNavigation() {
 
             const navLinks =
-                document.querySelectorAll('.nav-link');
+                document.querySelectorAll(
+                    '.nav-link'
+                );
 
 
             navLinks.forEach(link => {
 
-                link.addEventListener('click', event => {
+                link.addEventListener(
+                    'click',
+                    event => {
 
-                    event.preventDefault();
+                        event.preventDefault();
 
-                    const section =
-                        link.getAttribute('data-section');
 
-                    this.showSection(section);
-                    this.updateActiveNav(link);
+                        const section =
+                            link.getAttribute(
+                                'data-section'
+                            );
 
-                });
+
+                        this.showSection(
+                            section
+                        );
+
+
+                        this.updateActiveNav(
+                            link
+                        );
+
+                    }
+                );
 
             });
 
 
-            this.showSection('dashboard');
+            this.showSection(
+                'dashboard'
+            );
 
 
             const defaultLink =
@@ -1072,8 +1250,13 @@
                     '.nav-link[data-section="dashboard"]'
                 );
 
+
             if (defaultLink) {
-                this.updateActiveNav(defaultLink);
+
+                this.updateActiveNav(
+                    defaultLink
+                );
+
             }
 
         }
@@ -1085,7 +1268,10 @@
                 .querySelectorAll('section')
                 .forEach(section => {
 
-                    section.classList.add('hidden');
+                    section.classList.add(
+                        'hidden'
+                    );
+
                     section.classList.remove(
                         'section-highlight'
                     );
@@ -1094,7 +1280,9 @@
 
 
             const targetSection =
-                document.getElementById(sectionName);
+                document.getElementById(
+                    sectionName
+                );
 
 
             if (!targetSection) {
@@ -1102,7 +1290,9 @@
             }
 
 
-            targetSection.classList.remove('hidden');
+            targetSection.classList.remove(
+                'hidden'
+            );
 
 
             setTimeout(() => {
@@ -1115,12 +1305,38 @@
 
 
             if (sectionName === 'expenses') {
+
                 this.loadExpensesData();
+
             }
 
 
             if (sectionName === 'analytics') {
+
                 this.loadAnalyticsData();
+
+            }
+
+
+            /*
+             * IMPORTANT:
+             *
+             * We DO NOT reload the dashboard donut
+             * every time navigation happens.
+             *
+             * If the dashboard chart doesn't exist yet,
+             * create it.
+             */
+
+            if (
+                sectionName === 'dashboard' &&
+                !this.dashboardChart
+            ) {
+
+                this.loadDashboardData(
+                    true
+                );
+
             }
 
         }
@@ -1170,113 +1386,168 @@
         initializeChat() {
 
             const userInput =
-                document.getElementById('user-input');
+                document.getElementById(
+                    'user-input'
+                );
+
 
             const sendBtn =
-                document.getElementById('send-btn');
+                document.getElementById(
+                    'send-btn'
+                );
 
 
-            const sendMessage = async () => {
+            const sendMessage =
+                async () => {
 
-                const message =
-                    userInput.value.trim();
-
-
-                if (!message) {
-                    return;
-                }
+                    const message =
+                        userInput.value.trim();
 
 
-                this.addMessage(message, 'user');
-
-                userInput.value = '';
-
-                this.showTypingIndicator();
-
-
-                try {
-
-                    const response =
-                        await fetch(
-                            `${this.apiBase}/chat`,
-                            {
-                                method: 'POST',
-
-                                headers: {
-                                    'Content-Type':
-                                        'application/json'
-                                },
-
-                                body: JSON.stringify({
-                                    message: message,
-                                    user_id: 'user123'
-                                })
-                            }
-                        );
-
-
-                    if (!response.ok) {
-
-                        throw new Error(
-                            `HTTP ${response.status}`
-                        );
-
+                    if (!message) {
+                        return;
                     }
 
 
-                    const data =
-                        await response.json();
-
-
-                    this.removeTypingIndicator();
-
-
-                    const botText =
-                        data.message ||
-                        data.reply ||
-                        'No reply from server.';
-
-
                     this.addMessage(
-                        botText,
-                        'bot'
+                        message,
+                        'user'
                     );
 
 
-                    if (data.insights) {
+                    userInput.value = '';
+
+                    this.showTypingIndicator();
+
+
+                    try {
+
+                        const response =
+                            await fetch(
+                                `${this.apiBase}/chat`,
+                                {
+                                    method: 'POST',
+
+                                    headers:
+                                        this.getHeaders(
+                                            true
+                                        ),
+
+                                    body:
+                                        JSON.stringify({
+                                            message:
+                                                message,
+
+                                            user_id:
+                                                this.userId
+                                        })
+                                }
+                            );
+
+
+                        if (!response.ok) {
+
+                            let detail =
+                                `HTTP ${response.status}`;
+
+
+                            try {
+
+                                const errorData =
+                                    await response.json();
+
+                                if (
+                                    errorData.detail
+                                ) {
+
+                                    detail =
+                                        errorData.detail;
+
+                                }
+
+                            }
+
+                            catch (_) {
+                                // Keep HTTP status.
+                            }
+
+
+                            throw new Error(
+                                detail
+                            );
+
+                        }
+
+
+                        const data =
+                            await response.json();
+
+
+                        this.removeTypingIndicator();
+
+
+                        const botText =
+                            data.message ||
+                            data.reply ||
+                            'No reply from server.';
+
 
                         this.addMessage(
-                            '💡 ' + data.insights,
-                            'bot',
-                            true
+                            botText,
+                            'bot'
+                        );
+
+
+                        if (data.insights) {
+
+                            this.addMessage(
+                                data.insights,
+                                'bot',
+                                true
+                            );
+
+                        }
+
+
+                        /*
+                         * IMPORTANT:
+                         *
+                         * We refresh the numbers and category
+                         * list after a transaction, BUT we DO NOT
+                         * rebuild the donut chart.
+                         *
+                         * Therefore:
+                         *
+                         * Input → numbers update
+                         * Input → categories update
+                         * Input → donut stays untouched
+                         */
+
+                        await this.loadDashboardData(
+                            false
                         );
 
                     }
 
+                    catch (error) {
 
-                    await this.loadDashboardData();
-
-                }
-
-                catch (error) {
-
-                    console.error(
-                        'Chat error:',
-                        error
-                    );
+                        console.error(
+                            'Chat error:',
+                            error
+                        );
 
 
-                    this.removeTypingIndicator();
+                        this.removeTypingIndicator();
 
 
-                    this.addMessage(
-                        '❌ Unable to connect to the finance assistant. Please check the server.',
-                        'bot'
-                    );
+                        this.addMessage(
+                            `❌ ${error.message || 'Unable to connect to the finance assistant.'}`,
+                            'bot'
+                        );
 
-                }
+                    }
 
-            };
+                };
 
 
             sendBtn.addEventListener(
@@ -1290,7 +1561,9 @@
                 event => {
 
                     if (event.key === 'Enter') {
+
                         sendMessage();
+
                     }
 
                 }
@@ -1347,7 +1620,9 @@
 
 
             const messageDiv =
-                document.createElement('div');
+                document.createElement(
+                    'div'
+                );
 
 
             messageDiv.className =
@@ -1405,7 +1680,7 @@
                         <div
                             class="${bgClass} rounded-2xl rounded-tl-none px-4 py-3 max-w-md"
                         >
-                            <p class="text-gray-800">
+                            <p class="text-gray-800 whitespace-pre-line">
                                 ${escapeHtml(text)}
                             </p>
                         </div>
@@ -1440,7 +1715,9 @@
 
 
             const typingDiv =
-                document.createElement('div');
+                document.createElement(
+                    'div'
+                );
 
 
             typingDiv.id =
@@ -1522,7 +1799,9 @@
            DASHBOARD DATA
         ====================================================== */
 
-        async loadDashboardData() {
+        async loadDashboardData(
+            refreshChart = false
+        ) {
 
             try {
 
@@ -1532,11 +1811,19 @@
                 ] = await Promise.all([
 
                     fetch(
-                        `${this.apiBase}/analytics?days=7`
+                        `${this.apiBase}/analytics?days=7`,
+                        {
+                            headers:
+                                this.getHeaders()
+                        }
                     ),
 
                     fetch(
-                        `${this.apiBase}/analytics?days=30`
+                        `${this.apiBase}/analytics?days=30`,
+                        {
+                            headers:
+                                this.getHeaders()
+                        }
                     )
 
                 ]);
@@ -1547,8 +1834,37 @@
                     !monthResponse.ok
                 ) {
 
+                    const failedResponse =
+                        !weekResponse.ok
+                            ? weekResponse
+                            : monthResponse;
+
+
+                    let errorText =
+                        `Analytics request failed (${failedResponse.status})`;
+
+
+                    try {
+
+                        const errorData =
+                            await failedResponse.json();
+
+                        if (errorData.detail) {
+
+                            errorText =
+                                errorData.detail;
+
+                        }
+
+                    }
+
+                    catch (_) {
+                        // Keep generic error.
+                    }
+
+
                     throw new Error(
-                        'Analytics request failed'
+                        errorText
                     );
 
                 }
@@ -1564,42 +1880,70 @@
 
                 const weeklyTotal =
                     Number(
-                        week.summary?.total_expenses || 0
+                        week.summary?.total_expenses ||
+                        0
                     );
 
 
                 const monthlyTotal =
                     Number(
-                        month.summary?.total_expenses || 0
+                        month.summary?.total_expenses ||
+                        0
                     );
 
 
-                document.getElementById(
-                    'weekly-spending'
-                ).textContent =
-                    formatCurrency(
-                        weeklyTotal
+                const weeklyElement =
+                    document.getElementById(
+                        'weekly-spending'
                     );
 
 
-                document.getElementById(
-                    'monthly-spending'
-                ).textContent =
-                    formatCurrency(
-                        monthlyTotal
+                const monthlyElement =
+                    document.getElementById(
+                        'monthly-spending'
                     );
+
+
+                const topElement =
+                    document.getElementById(
+                        'top-category'
+                    );
+
+
+                if (weeklyElement) {
+
+                    weeklyElement.textContent =
+                        formatCurrency(
+                            weeklyTotal
+                        );
+
+                }
+
+
+                if (monthlyElement) {
+
+                    monthlyElement.textContent =
+                        formatCurrency(
+                            monthlyTotal
+                        );
+
+                }
 
 
                 const top =
                     month.top_spending_categories?.[0];
 
 
-                document.getElementById(
-                    'top-category'
-                ).textContent =
-                    top
-                        ? String(top.category)
-                        : '-';
+                if (topElement) {
+
+                    topElement.textContent =
+                        top
+                            ? String(
+                                top.category
+                            )
+                            : '-';
+
+                }
 
 
                 const categoryData =
@@ -1614,28 +1958,45 @@
                     );
 
 
-                this.updateChart(
-
-                    {
-                        labels:
-                            Object.keys(
-                                categoryData
-                            ),
-
-                        values:
-                            Object.values(
-                                categoryData
-                            )
-                    },
-
-                    'dashboardSpendingChart'
-
-                );
-
+                /*
+                 * Update the category list every time.
+                 */
 
                 this.updateCategories(
                     categoryData
                 );
+
+
+                /*
+                 * THIS IS THE IMPORTANT FIX.
+                 *
+                 * Only create/rebuild the donut when
+                 * refreshChart === true.
+                 *
+                 * Chat transactions call this method with
+                 * false, so the existing donut remains
+                 * completely untouched.
+                 */
+
+                if (refreshChart) {
+
+                    this.updateChart(
+                        {
+                            labels:
+                                Object.keys(
+                                    categoryData
+                                ),
+
+                            values:
+                                Object.values(
+                                    categoryData
+                                )
+                        },
+
+                        'dashboardSpendingChart'
+                    );
+
+                }
 
             }
 
@@ -1645,6 +2006,34 @@
                     'Dashboard data error:',
                     error
                 );
+
+
+                /*
+                 * Don't destroy an existing working chart
+                 * because of a temporary API error.
+                 */
+
+                if (
+                    refreshChart &&
+                    !this.dashboardChart
+                ) {
+
+                    const canvas =
+                        document.getElementById(
+                            'dashboardSpendingChart'
+                        );
+
+
+                    if (canvas) {
+
+                        this.drawEmptyChart(
+                            canvas.getContext('2d'),
+                            'Unable to load chart data'
+                        );
+
+                    }
+
+                }
 
             }
 
@@ -1661,14 +2050,25 @@
 
                 const response =
                     await fetch(
-                        `${this.apiBase}/expenses?days=365`
+                        `${this.apiBase}/expenses?days=365`,
+                        {
+                            headers:
+                                this.getHeaders()
+                        }
                     );
 
 
+                if (!response.ok) {
+
+                    throw new Error(
+                        `HTTP ${response.status}`
+                    );
+
+                }
+
+
                 const data =
-                    response.ok
-                        ? await response.json()
-                        : { expenses: [] };
+                    await response.json();
 
 
                 const expenses =
@@ -1753,7 +2153,9 @@
                 expenses.map(expense => {
 
                     const amount =
-                        Number(expense.amount) || 0;
+                        Number(
+                            expense.amount
+                        ) || 0;
 
 
                     const description =
@@ -1797,19 +2199,25 @@
                                     <p
                                         class="font-medium text-gray-800 truncate"
                                     >
-                                        ${escapeHtml(description)}
+                                        ${escapeHtml(
+                                            description
+                                        )}
                                     </p>
 
                                     <p
                                         class="text-sm text-gray-500 mt-1"
                                     >
-                                        ${escapeHtml(date)}
+                                        ${escapeHtml(
+                                            date
+                                        )}
                                     </p>
 
                                     <span
                                         class="inline-block mt-1 text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full"
                                     >
-                                        ${escapeHtml(category)}
+                                        ${escapeHtml(
+                                            category
+                                        )}
                                     </span>
 
                                 </div>
@@ -1824,7 +2232,9 @@
                                 <p
                                     class="font-bold text-red-600"
                                 >
-                                    -${formatCurrency(amount)}
+                                    -${formatCurrency(
+                                        amount
+                                    )}
                                 </p>
 
                                 ${
@@ -1858,7 +2268,9 @@
         wireDeleteButtons() {
 
             document
-                .querySelectorAll('.delete-expense')
+                .querySelectorAll(
+                    '.delete-expense'
+                )
                 .forEach(button => {
 
                     button.addEventListener(
@@ -1892,7 +2304,11 @@
                                     await fetch(
                                         `${this.apiBase}/expenses/${encodeURIComponent(id)}`,
                                         {
-                                            method: 'DELETE'
+                                            method:
+                                                'DELETE',
+
+                                            headers:
+                                                this.getHeaders()
                                         }
                                     );
 
@@ -1900,7 +2316,7 @@
                                 if (!response.ok) {
 
                                     throw new Error(
-                                        'Could not delete expense.'
+                                        `Could not delete expense (HTTP ${response.status}).`
                                     );
 
                                 }
@@ -1910,7 +2326,15 @@
 
                                     this.loadExpensesData(),
 
-                                    this.loadDashboardData()
+                                    /*
+                                     * Update dashboard numbers and
+                                     * categories, but also refresh
+                                     * chart because data was deleted.
+                                     */
+
+                                    this.loadDashboardData(
+                                        true
+                                    )
 
                                 ]);
 
@@ -1991,7 +2415,10 @@
 
 
             const inRange =
-                (expense, startDate) => {
+                (
+                    expense,
+                    startDate
+                ) => {
 
                     const date =
                         parseDateLocal(
@@ -2075,7 +2502,9 @@
             if (totalElement) {
 
                 totalElement.textContent =
-                    formatCurrency(total);
+                    formatCurrency(
+                        total
+                    );
 
             }
 
@@ -2112,7 +2541,11 @@
 
                 const response =
                     await fetch(
-                        `${this.apiBase}/analytics?days=3650`
+                        `${this.apiBase}/analytics?days=3650`,
+                        {
+                            headers:
+                                this.getHeaders()
+                        }
                     );
 
 
@@ -2244,7 +2677,6 @@
 
 
             this.updateChart(
-
                 {
                     labels:
                         (analytics.categories || [])
@@ -2262,7 +2694,6 @@
                 },
 
                 'spendingChart'
-
             );
 
 
@@ -2284,6 +2715,11 @@
                 document.getElementById(
                     'analytics-insights'
                 );
+
+
+            if (!container) {
+                return;
+            }
 
 
             container.innerHTML = `
@@ -2328,7 +2764,9 @@
                             <div
                                 class="p-3 bg-blue-50 rounded-xl text-gray-700"
                             >
-                                ${escapeHtml(insight)}
+                                ${escapeHtml(
+                                    insight
+                                )}
                             </div>
 
                         `
@@ -2395,7 +2833,10 @@
                                             class="h-2 bg-blue-500 rounded-full"
                                             style="width:${Math.min(
                                                 100,
-                                                percentage
+                                                Math.max(
+                                                    0,
+                                                    percentage
+                                                )
                                             )}%"
                                         ></div>
 
@@ -2417,7 +2858,9 @@
                                     <p
                                         class="text-xs text-gray-500"
                                     >
-                                        ${percentage.toFixed(1)}%
+                                        ${percentage.toFixed(
+                                            1
+                                        )}%
                                     </p>
 
                                 </div>
@@ -2459,7 +2902,8 @@
 
             container.innerHTML =
                 transactions
-                    .map(item => `
+                    .map(
+                        item => `
 
                         <div
                             class="flex items-center justify-between p-3 bg-gray-50 rounded-xl"
@@ -2501,7 +2945,8 @@
 
                         </div>
 
-                    `)
+                    `
+                    )
                     .join('');
 
         }
@@ -2544,7 +2989,8 @@
 
                         const percentage =
                             Number(
-                                item.utilization_pct || 0
+                                item.utilization_pct ||
+                                0
                             );
 
 
@@ -2620,7 +3066,9 @@
                                     </span>
 
                                     <span>
-                                        ${percentage.toFixed(1)}%
+                                        ${percentage.toFixed(
+                                            1
+                                        )}%
                                     </span>
 
                                 </div>
@@ -2634,7 +3082,10 @@
                                         class="h-2 rounded-full ${progressClass}"
                                         style="width:${Math.min(
                                             100,
-                                            percentage
+                                            Math.max(
+                                                0,
+                                                percentage
+                                            )
                                         )}%"
                                     ></div>
 
@@ -2651,7 +3102,7 @@
 
 
         /* =====================================================
-           COLORED DONUT CHART
+           DONUT CHART
         ====================================================== */
 
         updateChart(
@@ -2672,25 +3123,81 @@
                 }
 
 
+                /*
+                 * If Chart.js isn't loaded, don't crash
+                 * the entire application.
+                 */
+
+                if (
+                    typeof Chart ===
+                    'undefined'
+                ) {
+
+                    console.error(
+                        'Chart.js is not loaded.'
+                    );
+
+                    return;
+
+                }
+
+
                 const ctx =
-                    canvas.getContext('2d');
+                    canvas.getContext(
+                        '2d'
+                    );
+
+
+                if (!ctx) {
+
+                    console.error(
+                        'Could not get chart canvas context.'
+                    );
+
+                    return;
+
+                }
 
 
                 const labels =
-                    categoryData?.labels || [];
+                    Array.isArray(
+                        categoryData?.labels
+                    )
+                        ? categoryData.labels
+                        : [];
 
 
                 const values =
-                    (categoryData?.values || [])
-                        .map(
+                    Array.isArray(
+                        categoryData?.values
+                    )
+                        ? categoryData.values.map(
                             value =>
                                 Number(value) || 0
+                        )
+                        : [];
+
+
+                const validData =
+                    labels
+                        .map(
+                            (label, index) => ({
+                                label:
+                                    String(label),
+
+                                value:
+                                    values[index] || 0
+                            })
+                        )
+                        .filter(
+                            item =>
+                                item.value > 0
                         );
 
 
                 /*
-                 * Dashboard and Analytics have separate
-                 * Chart.js instances.
+                 * Destroy ONLY the chart associated with
+                 * this canvas.
                  */
 
                 const chartProperty =
@@ -2700,28 +3207,33 @@
                         : 'analyticsChart';
 
 
-                /*
-                 * Destroy the old chart belonging
-                 * only to this canvas.
-                 */
-
                 if (this[chartProperty]) {
 
                     this[chartProperty].destroy();
 
-                    this[chartProperty] = null;
+                    this[chartProperty] =
+                        null;
 
                 }
 
 
                 /*
-                 * No data.
+                 * Clear any previous empty-chart drawing.
                  */
 
-                if (
-                    !labels.length ||
-                    !values.length
-                ) {
+                ctx.clearRect(
+                    0,
+                    0,
+                    canvas.width,
+                    canvas.height
+                );
+
+
+                /*
+                 * No spending data.
+                 */
+
+                if (!validData.length) {
 
                     this.drawEmptyChart(
                         ctx,
@@ -2733,44 +3245,51 @@
                 }
 
 
+                const finalLabels =
+                    validData.map(
+                        item =>
+                            item.label
+                    );
+
+
+                const finalValues =
+                    validData.map(
+                        item =>
+                            item.value
+                    );
+
+
                 /*
-                 * Distinct category colors.
+                 * Distinct colors.
                  *
-                 * These colors are NOT used to change
-                 * the actual proportions.
-                 *
-                 * Bills will still occupy 99%+ of the
-                 * donut if bills really represents 99%+
-                 * of total spending.
+                 * IMPORTANT:
+                 * These colors do NOT modify the actual
+                 * spending proportions.
                  */
 
                 const colors = [
 
-                    '#3B82F6', // Blue
-                    '#10B981', // Green
-                    '#F59E0B', // Amber
-                    '#EF4444', // Red
-                    '#8B5CF6', // Purple
-                    '#EC4899', // Pink
-                    '#06B6D4', // Cyan
-                    '#F97316', // Orange
-                    '#14B8A6', // Teal
-                    '#6366F1', // Indigo
-                    '#84CC16', // Lime
-                    '#A855F7'  // Violet
+                    '#3B82F6',
+                    '#10B981',
+                    '#F59E0B',
+                    '#EF4444',
+                    '#8B5CF6',
+                    '#EC4899',
+                    '#06B6D4',
+                    '#F97316',
+                    '#14B8A6',
+                    '#6366F1',
+                    '#84CC16',
+                    '#A855F7',
+                    '#64748B',
+                    '#D946EF',
+                    '#0EA5E9'
 
                 ];
 
 
-                /*
-                 * Automatically assign colors.
-                 *
-                 * If there are more categories than colors,
-                 * the palette repeats.
-                 */
-
                 const backgroundColors =
-                    labels.map(
+                    finalLabels.map(
                         (_, index) =>
                             colors[
                                 index %
@@ -2779,22 +3298,19 @@
                     );
 
 
-                /*
-                 * Total spending.
-                 *
-                 * Used ONLY for tooltip percentages.
-                 */
-
                 const total =
-                    values.reduce(
-                        (sum, value) =>
+                    finalValues.reduce(
+                        (
+                            sum,
+                            value
+                        ) =>
                             sum + value,
                         0
                     );
 
 
                 /*
-                 * Create the donut chart.
+                 * Create the actual Chart.js donut.
                  */
 
                 this[chartProperty] =
@@ -2802,46 +3318,36 @@
                         ctx,
                         {
 
-                            type: 'doughnut',
+                            type:
+                                'doughnut',
+
 
                             data: {
 
-                                labels: labels,
+                                labels:
+                                    finalLabels,
 
                                 datasets: [
 
                                     {
 
-                                        data: values,
-
-                                        /*
-                                         * THIS is what
-                                         * gives the donut
-                                         * its colors.
-                                         */
+                                        data:
+                                            finalValues,
 
                                         backgroundColor:
                                             backgroundColors,
 
-                                        /*
-                                         * White separators
-                                         * make small slices
-                                         * easier to see.
-                                         */
-
                                         borderColor:
                                             '#FFFFFF',
 
-                                        borderWidth: 3,
+                                        borderWidth:
+                                            3,
 
-                                        /*
-                                         * Slight movement
-                                         * when hovering.
-                                         */
+                                        hoverOffset:
+                                            8,
 
-                                        hoverOffset: 8,
-
-                                        spacing: 2
+                                        spacing:
+                                            2
 
                                     }
 
@@ -2852,16 +3358,14 @@
 
                             options: {
 
-                                responsive: true,
+                                responsive:
+                                    true,
 
                                 maintainAspectRatio:
                                     false,
 
-                                /*
-                                 * Size of center hole.
-                                 */
-
-                                cutout: '60%',
+                                cutout:
+                                    '60%',
 
 
                                 animation: {
@@ -2877,11 +3381,10 @@
 
                                 plugins: {
 
-                                    /*
-                                     * CATEGORY LEGEND
-                                     */
-
                                     legend: {
+
+                                        display:
+                                            true,
 
                                         position:
                                             'bottom',
@@ -2897,8 +3400,17 @@
                                             pointStyle:
                                                 'circle',
 
+                                            boxWidth:
+                                                10,
+
+                                            boxHeight:
+                                                10,
+
                                             font: {
-                                                size: 12
+
+                                                size:
+                                                    12
+
                                             }
 
                                         }
@@ -2906,14 +3418,10 @@
                                     },
 
 
-                                    /*
-                                     * TOOLTIP
-                                     *
-                                     * Shows both amount
-                                     * and percentage.
-                                     */
-
                                     tooltip: {
+
+                                        enabled:
+                                            true,
 
                                         callbacks: {
 
@@ -2932,18 +3440,20 @@
                                                     const percentage =
                                                         total > 0
                                                             ? (
-                                                                (
-                                                                    value /
-                                                                    total
-                                                                ) *
+                                                                value /
+                                                                total *
                                                                 100
-                                                            ).toFixed(1)
+                                                            ).toFixed(
+                                                                1
+                                                            )
                                                             : '0.0';
 
 
-                                                    return `${context.label}: ${formatCurrency(
-                                                        value
-                                                    )} (${percentage}%)`;
+                                                    return (
+                                                        `${context.label}: ` +
+                                                        `${formatCurrency(value)} ` +
+                                                        `(${percentage}%)`
+                                                    );
 
                                                 }
 
@@ -2976,7 +3486,9 @@
            MONTHLY INCOME VS EXPENSES
         ====================================================== */
 
-        updateTrendsChart(monthly) {
+        updateTrendsChart(
+            monthly
+        ) {
 
             try {
 
@@ -2991,20 +3503,36 @@
                 }
 
 
+                if (
+                    typeof Chart ===
+                    'undefined'
+                ) {
+                    return;
+                }
+
+
                 const ctx =
-                    canvas.getContext('2d');
+                    canvas.getContext(
+                        '2d'
+                    );
 
 
                 if (this.trendsChart) {
 
                     this.trendsChart.destroy();
 
-                    this.trendsChart = null;
+                    this.trendsChart =
+                        null;
 
                 }
 
 
-                if (!monthly.length) {
+                if (
+                    !Array.isArray(
+                        monthly
+                    ) ||
+                    !monthly.length
+                ) {
 
                     this.drawEmptyChart(
                         ctx,
@@ -3021,7 +3549,9 @@
                         ctx,
                         {
 
-                            type: 'line',
+                            type:
+                                'line',
+
 
                             data: {
 
@@ -3030,6 +3560,7 @@
                                         month =>
                                             month.label
                                     ),
+
 
                                 datasets: [
 
@@ -3090,6 +3621,7 @@
 
                                 maintainAspectRatio:
                                     false,
+
 
                                 scales: {
 
@@ -3157,7 +3689,9 @@
            SAVINGS TREND
         ====================================================== */
 
-        updateCashflowChart(monthly) {
+        updateCashflowChart(
+            monthly
+        ) {
 
             try {
 
@@ -3172,20 +3706,36 @@
                 }
 
 
+                if (
+                    typeof Chart ===
+                    'undefined'
+                ) {
+                    return;
+                }
+
+
                 const ctx =
-                    canvas.getContext('2d');
+                    canvas.getContext(
+                        '2d'
+                    );
 
 
                 if (this.cashflowChart) {
 
                     this.cashflowChart.destroy();
 
-                    this.cashflowChart = null;
+                    this.cashflowChart =
+                        null;
 
                 }
 
 
-                if (!monthly.length) {
+                if (
+                    !Array.isArray(
+                        monthly
+                    ) ||
+                    !monthly.length
+                ) {
 
                     this.drawEmptyChart(
                         ctx,
@@ -3202,7 +3752,9 @@
                         ctx,
                         {
 
-                            type: 'bar',
+                            type:
+                                'bar',
+
 
                             data: {
 
@@ -3211,6 +3763,7 @@
                                         month =>
                                             month.label
                                     ),
+
 
                                 datasets: [
 
@@ -3315,6 +3868,11 @@
             message
         ) {
 
+            if (!ctx) {
+                return;
+            }
+
+
             ctx.clearRect(
                 0,
                 0,
@@ -3352,7 +3910,9 @@
            CATEGORY LIST
         ====================================================== */
 
-        updateCategories(categoryData) {
+        updateCategories(
+            categoryData
+        ) {
 
             const container =
                 document.getElementById(
@@ -3360,14 +3920,28 @@
                 );
 
 
+            if (!container) {
+                return;
+            }
+
+
             const categories =
                 Object.entries(
                     categoryData || {}
                 )
+                .map(
+                    ([category, amount]) => [
+                        category,
+                        Number(amount) || 0
+                    ]
+                )
+                .filter(
+                    ([, amount]) =>
+                        amount > 0
+                )
                 .sort(
                     (a, b) =>
-                        Number(b[1]) -
-                        Number(a[1])
+                        b[1] - a[1]
                 );
 
 
