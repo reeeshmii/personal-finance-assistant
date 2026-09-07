@@ -65,22 +65,13 @@ class FinanceNLP:
     def parse_transaction(self, user_input: str) -> Dict:
         if self.client:
             result = self._groq_parse(user_input)
-            if result:
+            # Only accept Groq results that identify a real transaction.
+            if result and result.get("type") in {"expense", "income"}:
                 return result
-        return self._local_parse_transaction(user_input)
-    
-    def parse_transaction(self, user_input: str) -> Dict:  
-        if self.client:
-            result = self._groq_parse(user_input)
 
-        # Only accept Groq result if it successfully identified
-        # an actual income or expense transaction.
-        if result and result.get("type") in {"expense", "income"}:
-            return result
-        # If Groq returns unknown/fails, use deterministic local parsing.
+        # If Groq is unavailable, returns unknown, or fails, use the
+        # deterministic local parser.
         return self._local_parse_transaction(user_input)
-
-    
 
     def parse_income(self, user_input: str) -> Dict:
         result = self.parse_transaction(user_input)

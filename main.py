@@ -181,7 +181,10 @@ async def chat_endpoint(chat_message: ChatMessage):
 
         # 4. Context-aware Groq response. The model receives calculated analytics,
         # never raw secrets, and is instructed not to invent financial facts.
-        analytics = _load_analytics(3650)
+        analytics = _load_analytics(
+            chat_message.user_id,
+            3650
+        )
         answer = nlp.answer_finance_question(raw, analytics)
         if answer:
             return ExpenseResponse(success=True, message=answer)

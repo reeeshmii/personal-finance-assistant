@@ -16,7 +16,7 @@ import sys
 from database import ExpenseDatabase
 
 
-def migrate(source_path: str) -> None:
+def migrate(source_path: str, user_id: str = "legacy") -> None:
     if not os.getenv("DATABASE_URL", "").startswith(("postgres://", "postgresql://")):
         raise SystemExit("DATABASE_URL must be a PostgreSQL connection string for migration.")
 
@@ -28,14 +28,14 @@ def migrate(source_path: str) -> None:
     with source:
         for row in source.execute("SELECT amount, description, category, date FROM expenses ORDER BY id"):
             existing = [
-                item for item in target.get_all_expenses()
+                item for item in target.get_all_expenses(user_id)
                 if float(item["amount"]) == float(row["amount"])
                 and item["description"] == row["description"]
                 and item["category"] == row["category"]
                 and item["date"] == row["date"]
             ]
             if not existing:
-                target.add_expense(row["amount"], row["description"], row["category"], row["date"])
+                target.add_expense(user_id, row["amount"], row["description"], row["category"], row["date"])
                 expense_count += 1
 
         # Older SQLite projects may not have an income table.
@@ -43,18 +43,18 @@ def migrate(source_path: str) -> None:
         if "income" in tables:
             for row in source.execute("SELECT amount, source, date FROM income ORDER BY id"):
                 existing = [
-                    item for item in target.get_all_income()
+                    item for item in target.get_all_income(user_id)
                     if float(item["amount"]) == float(row["amount"])
                     and item["source"] == row["source"]
                     and item["date"] == row["date"]
                 ]
                 if not existing:
-                    target.add_income(row["amount"], row["source"], row["date"])
+                    target.add_income(user_id, row["amount"], row["source"], row["date"])
                     income_count += 1
 
         if "budgets" in tables:
             for row in source.execute("SELECT category, amount, month FROM budgets ORDER BY id"):
-                target.set_budget(row["category"], row["amount"], row["month"])
+                target.set_budget(user_id, row["category"], row["amount"], row["month"])
                 budget_count += 1
 
     source.close()
@@ -62,4 +62,4 @@ def migrate(source_path: str) -> None:
 
 
 if __name__ == "__main__":
-    migrate(sys.argv[1] if len(sys.argv) > 1 else "finance.db")
+    migrate(sys.argv[1] if len(sys.argv) > 1 else "finance.db", os.getenv("MIGRATION_USER_ID", "legacy"))

@@ -25,8 +25,8 @@ def reset_database(confirm: bool = False) -> None:
 
     db = ExpenseDatabase(DB_PATH)
     print("Fresh local database created")
-    print(f"Expenses: {len(db.get_expenses(days=36500))}")
-    print(f"Income: {len(db.get_income(days=36500))}")
+    print(f"Expenses: {len(db.get_expenses('legacy', days=36500))}")
+    print(f"Income: {len(db.get_income('legacy', days=36500))}")
 
 
 if __name__ == "__main__":
