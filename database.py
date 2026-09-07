@@ -1,12 +1,14 @@
 """Persistence layer for the Personal Finance Assistant.
 
-SQLite is used for local development. Production deployments should use a
-persistent PostgreSQL database (for example Neon on Vercel).
+SQLite is used for local development. Production deployments use persistent
+PostgreSQL (for example Neon on Vercel). Every record is scoped to an
+anonymous browser user_id so users do not see each other's financial data.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
@@ -33,8 +35,17 @@ def _resolve_sqlite_path(url: str, override: Optional[str] = None) -> str:
     return url or "finance.db"
 
 
+def _validate_user_id(user_id: str) -> str:
+    value = str(user_id or "").strip()
+    if not value:
+        raise ValueError("user_id is required.")
+    if len(value) > 100:
+        raise ValueError("user_id is too long.")
+    return value
+
+
 class ExpenseDatabase:
-    """Small database repository supporting local SQLite and production Postgres."""
+    """Repository supporting SQLite locally and PostgreSQL in production."""
 
     def __init__(self, db_path: Optional[str] = None):
         self.database_url = _database_url()
@@ -79,6 +90,7 @@ class ExpenseDatabase:
                     """
                     CREATE TABLE IF NOT EXISTS expenses (
                         id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                        user_id TEXT NOT NULL,
                         amount DOUBLE PRECISION NOT NULL CHECK(amount > 0),
                         description TEXT NOT NULL,
                         category TEXT NOT NULL,
@@ -89,6 +101,7 @@ class ExpenseDatabase:
                     """
                     CREATE TABLE IF NOT EXISTS income (
                         id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                        user_id TEXT NOT NULL,
                         amount DOUBLE PRECISION NOT NULL CHECK(amount > 0),
                         source TEXT NOT NULL,
                         date TEXT NOT NULL,
@@ -98,10 +111,11 @@ class ExpenseDatabase:
                     """
                     CREATE TABLE IF NOT EXISTS budgets (
                         id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+                        user_id TEXT NOT NULL,
                         category TEXT NOT NULL,
                         amount DOUBLE PRECISION NOT NULL CHECK(amount > 0),
                         month TEXT NOT NULL,
-                        UNIQUE(category, month)
+                        CONSTRAINT budgets_user_category_month_key UNIQUE(user_id, category, month)
                     )
                     """,
                 ]
@@ -110,6 +124,7 @@ class ExpenseDatabase:
                     """
                     CREATE TABLE IF NOT EXISTS expenses (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id TEXT NOT NULL,
                         amount REAL NOT NULL CHECK(amount > 0),
                         description TEXT NOT NULL,
                         category TEXT NOT NULL,
@@ -120,6 +135,7 @@ class ExpenseDatabase:
                     """
                     CREATE TABLE IF NOT EXISTS income (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id TEXT NOT NULL,
                         amount REAL NOT NULL CHECK(amount > 0),
                         source TEXT NOT NULL,
                         date TEXT NOT NULL,
@@ -129,10 +145,11 @@ class ExpenseDatabase:
                     """
                     CREATE TABLE IF NOT EXISTS budgets (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        user_id TEXT NOT NULL,
                         category TEXT NOT NULL,
                         amount REAL NOT NULL CHECK(amount > 0),
                         month TEXT NOT NULL,
-                        UNIQUE(category, month)
+                        UNIQUE(user_id, category, month)
                     )
                     """,
                 ]
@@ -140,9 +157,52 @@ class ExpenseDatabase:
             for statement in statements:
                 conn.execute(self._sql(statement))
 
-            conn.execute(self._sql("CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date)"))
-            conn.execute(self._sql("CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category)"))
-            conn.execute(self._sql("CREATE INDEX IF NOT EXISTS idx_income_date ON income(date)"))
+            # Migrate an older deployed schema that did not have user_id.
+            for table in ("expenses", "income", "budgets"):
+                if self.is_postgres:
+                    conn.execute(self._sql(
+                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS user_id TEXT NOT NULL DEFAULT 'legacy'"
+                    ))
+                else:
+                    columns = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+                    if "user_id" not in columns:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN user_id TEXT NOT NULL DEFAULT 'legacy'")
+
+            conn.execute(self._sql("CREATE INDEX IF NOT EXISTS idx_expenses_user_date ON expenses(user_id, date)"))
+            conn.execute(self._sql("CREATE INDEX IF NOT EXISTS idx_expenses_user_category ON expenses(user_id, category)"))
+            conn.execute(self._sql("CREATE INDEX IF NOT EXISTS idx_income_user_date ON income(user_id, date)"))
+            conn.execute(self._sql("CREATE INDEX IF NOT EXISTS idx_budgets_user_month ON budgets(user_id, month)"))
+
+            # Older Postgres deployments had UNIQUE(category, month). Remove
+            # that old constraint so different users can have the same budget.
+            if self.is_postgres:
+                rows = conn.execute("""
+                    SELECT con.conname
+                    FROM pg_constraint con
+                    JOIN pg_class rel ON rel.oid = con.conrelid
+                    WHERE rel.relname = 'budgets'
+                      AND con.contype = 'u'
+                      AND (
+                          SELECT array_agg(att.attname ORDER BY x.ordinality)
+                          FROM unnest(con.conkey) WITH ORDINALITY AS x(attnum, ordinality)
+                          JOIN pg_attribute att ON att.attrelid = rel.oid AND att.attnum = x.attnum
+                      ) = ARRAY['category','month']::text[]
+                """).fetchall()
+                for row in rows:
+                    conn.execute(f'ALTER TABLE budgets DROP CONSTRAINT IF EXISTS "{row["conname"]}"')
+                conn.execute("""
+                    DO $$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_constraint
+                            WHERE conrelid = 'budgets'::regclass
+                              AND contype = 'u'
+                              AND conname = 'budgets_user_category_month_key'
+                        ) THEN
+                            ALTER TABLE budgets ADD CONSTRAINT budgets_user_category_month_key UNIQUE (user_id, category, month);
+                        END IF;
+                    END $$;
+                """)
 
     @staticmethod
     def _validate_iso_date(value: str) -> str:
@@ -160,11 +220,9 @@ class ExpenseDatabase:
             raise ValueError("Month must be in YYYY-MM format.") from exc
         return value
 
-    # ------------------------------------------------------------------ #
-    # Expenses
-    # ------------------------------------------------------------------ #
-
-    def add_expense(self, amount: float, description: str, category: str, date: Optional[str] = None) -> int:
+    # Expenses -----------------------------------------------------------
+    def add_expense(self, user_id: str, amount: float, description: str, category: str, date: Optional[str] = None) -> int:
+        user_id = _validate_user_id(user_id)
         if amount <= 0:
             raise ValueError("Expense amount must be positive.")
         description = str(description or "").strip()
@@ -175,21 +233,24 @@ class ExpenseDatabase:
 
         with self._get_conn() as conn:
             cur = conn.execute(
-                self._sql("INSERT INTO expenses (amount, description, category, date) VALUES (?,?,?,?) RETURNING id"),
-                (float(amount), description, category, expense_date),
+                self._sql("INSERT INTO expenses (user_id, amount, description, category, date) VALUES (?,?,?,?,?) RETURNING id"),
+                (user_id, float(amount), description, category, expense_date),
             )
-            return int(cur.fetchone()["id"] if self.is_postgres else cur.fetchone()[0])
+            row = cur.fetchone()
+            return int(row["id"] if self.is_postgres else row[0])
 
-    def delete_expense(self, expense_id: int) -> bool:
+    def delete_expense(self, user_id: str, expense_id: int) -> bool:
+        user_id = _validate_user_id(user_id)
         with self._get_conn() as conn:
-            cur = conn.execute(self._sql("DELETE FROM expenses WHERE id = ?"), (expense_id,))
+            cur = conn.execute(self._sql("DELETE FROM expenses WHERE id = ? AND user_id = ?"), (expense_id, user_id))
             return cur.rowcount > 0
 
-    def get_expenses(self, days: int = 30, category: Optional[str] = None) -> list[dict]:
+    def get_expenses(self, user_id: str, days: int = 30, category: Optional[str] = None) -> list[dict]:
+        user_id = _validate_user_id(user_id)
         days = max(1, int(days))
         start_date = (date.today() - timedelta(days=days - 1)).isoformat()
-        query = "SELECT * FROM expenses WHERE date >= ?"
-        params: list[Any] = [start_date]
+        query = "SELECT * FROM expenses WHERE user_id = ? AND date >= ?"
+        params: list[Any] = [user_id, start_date]
         if category:
             query += " AND category = ?"
             params.append(category.strip().lower())
@@ -198,29 +259,27 @@ class ExpenseDatabase:
             rows = conn.execute(self._sql(query), params).fetchall()
         return [dict(row) for row in rows]
 
-    def get_all_expenses(self) -> list[dict]:
+    def get_all_expenses(self, user_id: str) -> list[dict]:
+        user_id = _validate_user_id(user_id)
         with self._get_conn() as conn:
-            rows = conn.execute(self._sql("SELECT * FROM expenses ORDER BY date ASC, id ASC")).fetchall()
+            rows = conn.execute(self._sql("SELECT * FROM expenses WHERE user_id = ? ORDER BY date ASC, id ASC"), (user_id,)).fetchall()
         return [dict(row) for row in rows]
 
-    def get_spending_by_category(self, days: int = 30) -> dict[str, float]:
+    def get_spending_by_category(self, user_id: str, days: int = 30) -> dict[str, float]:
+        user_id = _validate_user_id(user_id)
         start_date = (date.today() - timedelta(days=max(1, days) - 1)).isoformat()
         with self._get_conn() as conn:
             rows = conn.execute(
-                self._sql(
-                    """SELECT category, SUM(amount) AS total
-                       FROM expenses WHERE date >= ?
-                       GROUP BY category ORDER BY total DESC"""
-                ),
-                (start_date,),
+                self._sql("""SELECT category, SUM(amount) AS total
+                    FROM expenses WHERE user_id = ? AND date >= ?
+                    GROUP BY category ORDER BY total DESC"""),
+                (user_id, start_date),
             ).fetchall()
         return {row["category"]: float(row["total"]) for row in rows}
 
-    # ------------------------------------------------------------------ #
-    # Income
-    # ------------------------------------------------------------------ #
-
-    def add_income(self, amount: float, source: str, date: Optional[str] = None) -> int:
+    # Income -------------------------------------------------------------
+    def add_income(self, user_id: str, amount: float, source: str, date: Optional[str] = None) -> int:
+        user_id = _validate_user_id(user_id)
         if amount <= 0:
             raise ValueError("Income amount must be positive.")
         source = str(source or "").strip()
@@ -229,35 +288,37 @@ class ExpenseDatabase:
         income_date = self._validate_iso_date(date or datetime.now().strftime("%Y-%m-%d"))
         with self._get_conn() as conn:
             cur = conn.execute(
-                self._sql("INSERT INTO income (amount, source, date) VALUES (?,?,?) RETURNING id"),
-                (float(amount), source, income_date),
+                self._sql("INSERT INTO income (user_id, amount, source, date) VALUES (?,?,?,?) RETURNING id"),
+                (user_id, float(amount), source, income_date),
             )
-            return int(cur.fetchone()["id"] if self.is_postgres else cur.fetchone()[0])
+            row = cur.fetchone()
+            return int(row["id"] if self.is_postgres else row[0])
 
-    def delete_income(self, income_id: int) -> bool:
+    def delete_income(self, user_id: str, income_id: int) -> bool:
+        user_id = _validate_user_id(user_id)
         with self._get_conn() as conn:
-            cur = conn.execute(self._sql("DELETE FROM income WHERE id = ?"), (income_id,))
+            cur = conn.execute(self._sql("DELETE FROM income WHERE id = ? AND user_id = ?"), (income_id, user_id))
             return cur.rowcount > 0
 
-    def get_income(self, days: int = 3650) -> list[dict]:
+    def get_income(self, user_id: str, days: int = 3650) -> list[dict]:
+        user_id = _validate_user_id(user_id)
         start_date = (date.today() - timedelta(days=max(1, days) - 1)).isoformat()
         with self._get_conn() as conn:
             rows = conn.execute(
-                self._sql("SELECT * FROM income WHERE date >= ? ORDER BY date DESC, id DESC"),
-                (start_date,),
+                self._sql("SELECT * FROM income WHERE user_id = ? AND date >= ? ORDER BY date DESC, id DESC"),
+                (user_id, start_date),
             ).fetchall()
         return [dict(row) for row in rows]
 
-    def get_all_income(self) -> list[dict]:
+    def get_all_income(self, user_id: str) -> list[dict]:
+        user_id = _validate_user_id(user_id)
         with self._get_conn() as conn:
-            rows = conn.execute(self._sql("SELECT * FROM income ORDER BY date ASC, id ASC")).fetchall()
+            rows = conn.execute(self._sql("SELECT * FROM income WHERE user_id = ? ORDER BY date ASC, id ASC"), (user_id,)).fetchall()
         return [dict(row) for row in rows]
 
-    # ------------------------------------------------------------------ #
-    # Budgets
-    # ------------------------------------------------------------------ #
-
-    def set_budget(self, category: str, amount: float, month: Optional[str] = None) -> None:
+    # Budgets ------------------------------------------------------------
+    def set_budget(self, user_id: str, category: str, amount: float, month: Optional[str] = None) -> None:
+        user_id = _validate_user_id(user_id)
         if amount <= 0:
             raise ValueError("Budget amount must be positive.")
         category = str(category or "").strip().lower()
@@ -266,19 +327,21 @@ class ExpenseDatabase:
         month = self._validate_month(month or datetime.now().strftime("%Y-%m"))
         with self._get_conn() as conn:
             statement = (
-                "INSERT INTO budgets (category, amount, month) VALUES (?,?,?) "
-                "ON CONFLICT(category, month) DO UPDATE SET amount = "
+                "INSERT INTO budgets (user_id, category, amount, month) VALUES (?,?,?,?) "
+                "ON CONFLICT(user_id, category, month) DO UPDATE SET amount = "
                 + ("EXCLUDED.amount" if self.is_postgres else "excluded.amount")
             )
-            conn.execute(self._sql(statement), (category, float(amount), month))
+            conn.execute(self._sql(statement), (user_id, category, float(amount), month))
 
-    def get_budgets(self, month: Optional[str] = None) -> list[dict]:
+    def get_budgets(self, user_id: str, month: Optional[str] = None) -> list[dict]:
+        user_id = _validate_user_id(user_id)
         month = self._validate_month(month or datetime.now().strftime("%Y-%m"))
         with self._get_conn() as conn:
-            rows = conn.execute(self._sql("SELECT * FROM budgets WHERE month = ? ORDER BY category"), (month,)).fetchall()
+            rows = conn.execute(self._sql("SELECT * FROM budgets WHERE user_id = ? AND month = ? ORDER BY category"), (user_id, month)).fetchall()
         return [dict(row) for row in rows]
 
-    def get_budget_vs_actual(self, month: Optional[str] = None) -> list[dict]:
+    def get_budget_vs_actual(self, user_id: str, month: Optional[str] = None) -> list[dict]:
+        user_id = _validate_user_id(user_id)
         month = self._validate_month(month or datetime.now().strftime("%Y-%m"))
         year, mon = map(int, month.split("-"))
         next_month = date(year + 1, 1, 1) if mon == 12 else date(year, mon + 1, 1)
@@ -286,31 +349,27 @@ class ExpenseDatabase:
         end = (next_month - timedelta(days=1)).isoformat()
         with self._get_conn() as conn:
             rows = conn.execute(
-                self._sql(
-                    """SELECT b.category, b.amount AS budget,
+                self._sql("""SELECT b.category, b.amount AS budget,
                               COALESCE(SUM(e.amount), 0) AS spent,
                               b.amount - COALESCE(SUM(e.amount), 0) AS remaining
                        FROM budgets b
-                       LEFT JOIN expenses e ON e.category = b.category
+                       LEFT JOIN expenses e ON e.user_id = b.user_id AND e.category = b.category
                          AND e.date >= ? AND e.date <= ?
-                       WHERE b.month = ?
-                       GROUP BY b.category, b.amount ORDER BY b.category"""
-                ),
-                (start, end, month),
+                       WHERE b.user_id = ? AND b.month = ?
+                       GROUP BY b.category, b.amount ORDER BY b.category"""),
+                (start, end, user_id, month),
             ).fetchall()
 
         result = []
         for row in rows:
             budget = float(row["budget"])
             spent = float(row["spent"])
-            result.append(
-                {
-                    "category": row["category"],
-                    "budget": budget,
-                    "spent": spent,
-                    "remaining": budget - spent,
-                    "utilization_pct": (spent / budget * 100.0) if budget else 0.0,
-                    "over_budget": spent > budget,
-                }
-            )
+            result.append({
+                "category": row["category"],
+                "budget": budget,
+                "spent": spent,
+                "remaining": budget - spent,
+                "utilization_pct": (spent / budget * 100.0) if budget else 0.0,
+                "over_budget": spent > budget,
+            })
         return result

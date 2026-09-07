@@ -6,7 +6,7 @@ import os
 import socket
 from contextlib import closing
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
@@ -26,7 +26,7 @@ app.add_middleware(
     allow_origins=cors_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-User-ID"],
 )
 
 db = ExpenseDatabase()
@@ -35,7 +35,7 @@ nlp = FinanceNLP()
 
 class ChatMessage(BaseModel):
     message: str = Field(..., min_length=1, max_length=2000)
-    user_id: str = Field(default="default", min_length=1, max_length=100)
+    user_id: str = Field(..., min_length=1, max_length=100)
 
 
 class ExpenseResponse(BaseModel):
@@ -81,12 +81,12 @@ async def health_check():
     }
 
 
-def _load_analytics(days: int = 3650) -> dict:
-    expenses = db.get_expenses(days=days)
-    income = db.get_income(days=days)
+def _load_analytics(user_id: str, days: int = 3650) -> dict:
+    expenses = db.get_expenses(user_id=user_id, days=days)
+    income = db.get_income(user_id=user_id, days=days)
     # Budgets are month-specific; loading the current set lets analytics expose
     # budget utilization without inventing budget data.
-    budgets = db.get_budgets()
+    budgets = db.get_budgets(user_id=user_id)
     return build_analytics(expenses, income, budgets)
 
 
@@ -106,12 +106,13 @@ async def chat_endpoint(chat_message: ChatMessage):
 
         if tx_type == "expense" and transaction.get("amount", 0) > 0:
             expense_id = db.add_expense(
+                user_id=chat_message.user_id,
                 amount=transaction["amount"],
                 description=transaction["description"],
                 category=transaction["category"],
                 date=transaction["date"],
             )
-            recent = db.get_expenses(days=7)
+            recent = db.get_expenses(user_id=chat_message.user_id, days=7)
             return ExpenseResponse(
                 success=True,
                 message=(
@@ -124,6 +125,7 @@ async def chat_endpoint(chat_message: ChatMessage):
 
         if tx_type == "income" and transaction.get("amount", 0) > 0:
             income_id = db.add_income(
+                user_id=chat_message.user_id,
                 amount=transaction["amount"],
                 source=transaction["source"],
                 date=transaction["date"],
@@ -145,7 +147,7 @@ async def chat_endpoint(chat_message: ChatMessage):
                 days = 7
             elif "year" in lower:
                 days = 365
-            analytics = _load_analytics(days)
+            analytics = _load_analytics(chat_message.user_id, days)
             summary = analytics["summary"]
             if summary["expense_transaction_count"] == 0 and summary["income_transaction_count"] == 0:
                 return ExpenseResponse(
@@ -200,9 +202,12 @@ async def chat_endpoint(chat_message: ChatMessage):
 
 
 @app.get("/api/analytics")
-async def get_analytics(days: int = Query(3650, ge=1, le=36500)):
+async def get_analytics(
+    days: int = Query(3650, ge=1, le=36500),
+    x_user_id: str = Header(..., alias="X-User-ID"),
+):
     try:
-        return _load_analytics(days)
+        return _load_analytics(x_user_id, days)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -211,64 +216,73 @@ async def get_analytics(days: int = Query(3650, ge=1, le=36500)):
 
 
 @app.get("/api/expenses")
-async def get_expenses(days: int = Query(30, ge=1, le=36500), category: str | None = None):
+async def get_expenses(
+    days: int = Query(30, ge=1, le=36500),
+    category: str | None = None,
+    x_user_id: str = Header(..., alias="X-User-ID"),
+):
     try:
-        return {"expenses": db.get_expenses(days=days, category=category)}
+        return {"expenses": db.get_expenses(user_id=x_user_id, days=days, category=category)}
     except Exception as exc:
         print(f"Expense query error: {type(exc).__name__}: {exc}")
         raise HTTPException(status_code=500, detail="Unable to load expenses.") from exc
 
 
 @app.delete("/api/expenses/{expense_id}")
-async def delete_expense(expense_id: int):
-    deleted = db.delete_expense(expense_id)
+async def delete_expense(expense_id: int, x_user_id: str = Header(..., alias="X-User-ID")):
+    deleted = db.delete_expense(user_id=x_user_id, expense_id=expense_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Expense not found")
     return {"success": True, "message": f"Expense {expense_id} deleted"}
 
 
 @app.get("/api/income")
-async def get_income(days: int = Query(3650, ge=1, le=36500)):
-    return {"income": db.get_income(days=days)}
+async def get_income(
+    days: int = Query(3650, ge=1, le=36500),
+    x_user_id: str = Header(..., alias="X-User-ID"),
+):
+    return {"income": db.get_income(user_id=x_user_id, days=days)}
 
 
 @app.delete("/api/income/{income_id}")
-async def delete_income(income_id: int):
-    deleted = db.delete_income(income_id)
+async def delete_income(income_id: int, x_user_id: str = Header(..., alias="X-User-ID")):
+    deleted = db.delete_income(user_id=x_user_id, income_id=income_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Income transaction not found")
     return {"success": True, "message": f"Income {income_id} deleted"}
 
 
 @app.get("/api/spending-by-category")
-async def get_spending_by_category(days: int = Query(30, ge=1, le=36500)):
-    return db.get_spending_by_category(days=days)
+async def get_spending_by_category(
+    days: int = Query(30, ge=1, le=36500),
+    x_user_id: str = Header(..., alias="X-User-ID"),
+):
+    return db.get_spending_by_category(user_id=x_user_id, days=days)
 
 
 @app.post("/api/budgets")
-async def set_budget(budget: BudgetRequest):
+async def set_budget(budget: BudgetRequest, x_user_id: str = Header(..., alias="X-User-ID")):
     try:
-        db.set_budget(budget.category, budget.amount, budget.month)
+        db.set_budget(x_user_id, budget.category, budget.amount, budget.month)
         return {"success": True, "message": f"Budget set for {budget.category}"}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/budgets")
-async def get_budgets(month: str | None = None):
+async def get_budgets(month: str | None = None, x_user_id: str = Header(..., alias="X-User-ID")):
     try:
-        return {"budgets": db.get_budgets(month)}
+        return {"budgets": db.get_budgets(x_user_id, month)}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/budgets/vs-actual")
-async def get_budget_vs_actual(month: str | None = None):
+async def get_budget_vs_actual(month: str | None = None, x_user_id: str = Header(..., alias="X-User-ID")):
     try:
-        return {"data": db.get_budget_vs_actual(month)}
+        return {"data": db.get_budget_vs_actual(x_user_id, month)}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
 
 def _find_free_port() -> int:
     with closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
