@@ -2,6 +2,12 @@
 
 A lightweight personal finance assistant built with **FastAPI + vanilla JavaScript**, with deterministic server-side financial analytics and optional **Groq-powered natural-language transaction parsing and financial Q&A**.
 
+<img width="1895" height="876" alt="image" src="https://github.com/user-attachments/assets/96a8f7cf-2979-444c-a056-802f41843ed1" />
+
+
+<img width="1896" height="870" alt="image" src="https://github.com/user-attachments/assets/851ece31-7fcf-4de0-8599-2edb1076b1cd" />
+
+
 ## What was improved
 
 - Reworked analytics into a dedicated, testable `analytics.py` business-logic layer.
